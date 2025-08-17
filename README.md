@@ -41,3 +41,9 @@ The full version will include:
 - Ability for the agent to transfer to a human customer service representative
 
 Stay tuned for updates and more features!
+
+## Demo
+
+You can try a live demo here: [https://www.tyfeng.fyi/#demo](https://www.tyfeng.fyi/#demo). Click to chat with my web agent backend using voice. This demo is powered by the configuration in `web_worker.py`.
+
+If you are interested in calling and chatting with the voice agent by phone, please contact me and I will provide my agent's Twilio phone number.
