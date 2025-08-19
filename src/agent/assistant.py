@@ -4,6 +4,7 @@ import asyncio
 import logging
 from dotenv import load_dotenv
 from typing import Any
+import aiohttp
 
 from livekit import rtc, api
 from livekit.agents import (
@@ -14,7 +15,7 @@ from livekit.agents import (
     JobProcess
 )
 from livekit.plugins import silero
-
+from utils.webhook import push_webhook 
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
 
@@ -36,12 +37,12 @@ class Assistant(Agent):
     ):
         super().__init__(
             instructions=f"""
-            You are a scheduling assistant for a dental practice. Your interface with user will be voice.
-            You will be on a call with a patient who has an upcoming appointment. Your goal is to confirm the appointment details.
-            As a customer service representative, you will be polite and professional at all times. Allow user to end the conversation.
+            You are a voice assistant developed by Feng. Your primary responsibilities are:
 
-            When the user would like to be transferred to a human agent, first confirm with them. upon confirmation, use the transfer_call tool.
-            The customer's name is {name}. His appointment is on {appointment_time}.
+            1. Scheduling conversations and appointments.
+            2. Searching and providing relevant information from the developer documentation.
+
+            Your interface with the user is voice-based. Always be polite, professional, and concise. If the user requests to speak with a human, confirm their intent before transferring. Provide helpful responses while keeping interactions natural and engaging. Only use your tools (like appointment scheduling or documentation search) when appropriate, based on the user's request.
             """
         )
         # keep reference to the participant for transfers
@@ -71,6 +72,49 @@ class Assistant(Agent):
             )
         )
         
+
+    @function_tool()
+    async def search_knowledge_base(
+        self,
+        context: RunContext,
+        query: str,
+    ) -> str:
+        # Send a verbal status update to the user after a short delay
+        async def _speak_status_update(delay: float = 0.5):
+            await asyncio.sleep(delay)
+            await context.session.generate_reply(instructions=f"""
+                You are searching the knowledge base for \"{query}\" but it is taking a little while.
+                Update the user on your progress, but be very brief.
+            """)
+        
+        status_update_task = asyncio.create_task(_speak_status_update(0.9))
+
+        # Perform search (function definition omitted for brevity)
+        async def _perform_search(query:str)-> str:
+            payload = {
+                "text": query,
+                "use_reranking": True
+            }
+            RAG_ENDPOINT = "http://127.0.0.1:8000/query"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(RAG_ENDPOINT, json=payload) as resp:
+                    if resp.status != 200:
+                        logger.error(f"RAG query failed: {await resp.text()}")
+                        return f"Error querying knowledge base: {resp.status}"
+                    
+                    data = await resp.json()
+                    # Assuming the endpoint returns something like {"results": [...]} 
+                    logger.info(f"RAG query returned {data} ")
+            return data
+
+
+        result = await _perform_search(query)
+        
+        # Cancel status update if search completed before timeout
+        status_update_task.cancel()
+        
+        return result
 
     @function_tool()
     async def transfer_call(self, ctx: RunContext):
@@ -118,47 +162,36 @@ class Assistant(Agent):
         await self.hangup()
 
     @function_tool()
-    async def look_up_availability(
-        self,
-        ctx: RunContext,
-        date: str,
-    ):
-        """Called when the user asks about alternative appointment availability
-
-        Args:
-            date: The date of the appointment to check availability for
-        """
-        logger.info(
-            f"looking up availability for {self.participant.identity} on {date}"
-        )
-        await asyncio.sleep(3)
-        return {
-            "available_times": ["1pm", "2pm", "3pm"],
-        }
-
-    @function_tool()
-    async def confirm_appointment(
-        self,
-        ctx: RunContext,
-        date: str,
-        time: str,
-    ):
-        """Called when the user confirms their appointment on a specific date.
-        Use this tool only when they are certain about the date and time.
-
-        Args:
-            date: The date of the appointment
-            time: The time of the appointment
-        """
-        logger.info(
-            f"confirming appointment for {self.participant.identity} on {date} at {time}"
-        )
-        return "reservation confirmed"
-
-    @function_tool()
     async def detected_answering_machine(self, ctx: RunContext):
         """Called when the call reaches voicemail. Use this tool AFTER you hear the voicemail greeting"""
         logger.info(f"detected answering machine for {self.participant.identity}")
         await self.hangup()
     
-    
+    @function_tool()
+    async def book_appointment(
+        self,
+        ctx: RunContext,
+        customer_name: str,
+        time_slot: str,
+        event_summary: str,
+    ):
+        """
+        Booking tool: sends appointment info to a webhook
+        Args:
+            customer_name: Name of the customer
+            time_slot: Time slot for the appointment
+            event_summary: Short summary of the event
+        """
+        payload = {
+            "customer_name": customer_name,
+            "time_slot": time_slot,
+            "event_summary": event_summary,
+        }
+        logger.info(f"Pushing appointment to webhook: {payload}")
+        await push_webhook(payload)
+
+        # Provide voice feedback to the user
+        await ctx.session.generate_reply(
+            instructions=f"Appointment information sent: {customer_name}, Time: {time_slot}, Summary: {event_summary}"
+        )
+        return "appointment pushed to webhook"
