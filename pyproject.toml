@@ -9,6 +9,7 @@ description = "Simple voice AI assistant built with LiveKit Agents for Python"
 requires-python = ">=3.11"
 
 dependencies = [
+    "flask>=3.1.2",
     "livekit-agents[anthropic,assemblyai,cartesia,deepgram,elevenlabs,google,openai,silero,turn-detector]~=1.2",
     "livekit-plugins-noise-cancellation~=0.2",
     "python-dotenv",

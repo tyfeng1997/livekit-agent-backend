@@ -31,25 +31,17 @@ class Assistant(Agent):
     def __init__(
         self,
         *,
-        name: str,
-        appointment_time: str,
-        dial_info: dict[str, Any],
+        instructions: str,
+        transfer_to: str = "",
     ):
+        
         super().__init__(
-            instructions=f"""
-            You are a voice assistant developed by Feng. Your primary responsibilities are:
-
-            1. Scheduling conversations and appointments.
-            2. Searching and providing relevant information from the developer documentation.
-
-            Your interface with the user is voice-based. Always be polite, professional, and concise. If the user requests to speak with a human, confirm their intent before transferring. Provide helpful responses while keeping interactions natural and engaging. Only use your tools (like appointment scheduling or documentation search) when appropriate, based on the user's request.
-            """
+            instructions=instructions
         )
         # keep reference to the participant for transfers
         self.participant: rtc.RemoteParticipant | None = None
-
-        self.dial_info = dial_info
-
+        self.transfer_to: str = transfer_to
+        print(f"[******] Assistant initialized with instructions: {instructions}, transfer_to: {transfer_to}")
     async def on_enter(self) -> None:
         await self.session.generate_reply(
             instructions="Greet the user with a warm welcome"
@@ -120,11 +112,10 @@ class Assistant(Agent):
     async def transfer_call(self, ctx: RunContext):
         """Transfer the call to a human agent, called after confirming with the user"""
 
-        transfer_to = self.dial_info["transfer_to"]
-        if not transfer_to:
+        if not self.transfer_to:
             return "cannot transfer call"
 
-        logger.info(f"transferring call to {transfer_to}")
+        logger.info(f"transferring call to {self.transfer_to}")
 
         # let the message play fully before transferring
         await ctx.session.generate_reply(
@@ -137,11 +128,11 @@ class Assistant(Agent):
                 api.TransferSIPParticipantRequest(
                     room_name=job_ctx.room.name,
                     participant_identity=self.participant.identity,
-                    transfer_to=f"tel:{transfer_to}",
+                    transfer_to=f"tel:{self.transfer_to}",
                 )
             )
 
-            logger.info(f"transferred call to {transfer_to}")
+            logger.info(f"transferred call to {self.transfer_to}")
         except Exception as e:
             logger.error(f"error transferring call: {e}")
             await ctx.session.generate_reply(
